@@ -1,5 +1,5 @@
 import eventlet
-eventlet.monkey_patch()          # debe ir antes de todo
+eventlet.monkey_patch()
 
 from flask import Flask, render_template
 from flask_socketio import SocketIO
@@ -36,11 +36,10 @@ def on_connect():
 if __name__ == '__main__':
     # Inicia el bucle de emisión en un hilo verde (eventlet)
     socketio.start_background_task(collect_and_emit)
-    # ✅ Así debe quedar
 socketio.run(
     app,
     host='0.0.0.0',
     port=5000,
-    debug=False,       # ← apaga el reloader
-    use_reloader=False # ← doble seguro, evita el bucle
+    debug=False,   
+    use_reloader=False 
 )

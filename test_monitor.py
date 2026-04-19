@@ -1,10 +1,9 @@
-# test_monitor.py
+
 import sys
 import psutil
 from collectors import cpu, memory, disk
 from core.alerts import check
 
-# ── colores para la consola ──────────────────────────────
 OK   = "\033[92m✓\033[0m"
 FAIL = "\033[91m✗\033[0m"
 INFO = "\033[94m→\033[0m"
