@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Linux Server Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
+  <style>
+    :root {
+      --bg:        #080c10;
+      --bg2:       #0d1117;
+      --bg3:       #111820;
+      --border:    #1e2d3d;
+      --border2:   #243447;
+      --text:      #cdd9e5;
+      --muted:     #546e7a;
+      --accent:    #00e5ff;
+      --accent2:   #00b0cc;
+      --ok:        #00e676;
+      --warn:      #ffb300;
+      --crit:      #ff1744;
+      --purple:    #7c4dff;
+      --font-mono: 'JetBrains Mono', monospace;
+      --font-head: 'Syne', sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Grid de fondo — efecto terminal */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+      background-size: 40px 40px;
+      opacity: 0.18;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .layout {
+      position: relative;
+      z-index: 1;
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 24px 24px 48px;
+    }
+
+    /* ── Header ───────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 28px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo-area { display: flex; align-items: center; gap: 14px; }
+
+    .logo-icon {
+      width: 38px; height: 38px;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--accent);
+      font-size: 16px;
+      position: relative;
+      overflow: hidden;
+    }
+    .logo-icon::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: var(--accent);
+      opacity: 0.08;
+    }
+
+    h1 {
+      font-family: var(--font-head);
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #fff;
+    }
+    h1 span { color: var(--accent); }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .conn-badge {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--ok);
+      animation: blink 2s ease-in-out infinite;
+    }
+    .dot.off { background: var(--crit); animation: none; }
+
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    .clock {
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+
+    /* ── Tarjetas de métricas ─────────────────────────── */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px 20px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color .2s;
+    }
+    .card:hover { border-color: var(--border2); }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--accent-card, var(--accent));
+      opacity: 0.6;
+    }
+    .card.ok-card   { --accent-card: var(--ok); }
+    .card.warn-card { --accent-card: var(--warn); }
+    .card.crit-card { --accent-card: var(--crit); }
+
+    .card-label {
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .card-value {
+      font-family: var(--font-head);
+      font-size: 32px;
+      font-weight: 800;
+      line-height: 1;
+      margin-bottom: 6px;
+      transition: color .3s;
+    }
+    .card-value.ok   { color: var(--ok); }
+    .card-value.warn { color: var(--warn); }
+    .card-value.crit { color: var(--crit); }
+
+    .card-sub {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* Mini sparkline en tarjeta */
+    .sparkline {
+      position: absolute;
+      bottom: 0; right: 0;
+      width: 80px; height: 40px;
+      opacity: 0.25;
+    }
+
+    /* ── Sección de gráficas ──────────────────────────── */
+    .section-label {
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .chart-box {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px 20px;
+    }
+
+    .chart-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .chart-title {
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .chart-current {
+      font-family: var(--font-head);
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    canvas { width: 100% !important; height: 140px !important; }
+
+    /* ── Disco ────────────────────────────────────────── */
+    .disk-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 10px;
+    }
+
+    .disk-item {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+
+    .disk-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 10px;
+    }
+
+    .disk-mount {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--accent);
+      letter-spacing: 0.04em;
+    }
+
+    .disk-info {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .bar-track {
+      height: 6px;
+      background: var(--bg3);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width .6s cubic-bezier(.4,0,.2,1);
+    }
+
+    /* ── Panel de sistema ─────────────────────────────── */
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .info-box {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px 20px;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .info-row:last-child { border-bottom: none; }
+
+    .info-key { color: var(--muted); letter-spacing: 0.03em; }
+    .info-val { color: var(--text); font-weight: 500; }
+    .info-val.accent { color: var(--accent); }
+
+    /* ── Load average bars ────────────────────────────── */
+    .load-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .load-row:last-child { border-bottom: none; }
+    .load-label { color: var(--muted); width: 40px; flex-shrink: 0; }
+    .load-bar-track { flex: 1; height: 4px; background: var(--bg3); border-radius: 2px; }
+    .load-bar-fill  { height: 100%; border-radius: 2px; background: var(--accent); transition: width .5s; }
+    .load-val { width: 36px; text-align: right; color: var(--text); }
+
+    /* ── Alertas ──────────────────────────────────────── */
+    #alert-container {
+      position: fixed;
+      bottom: 24px; right: 24px;
+      display: flex; flex-direction: column;
+      gap: 8px;
+      z-index: 100;
+      max-width: 340px;
+    }
+
+    .alert-toast {
+      background: #1a0a0a;
+      border: 1px solid var(--crit);
+      border-left: 3px solid var(--crit);
+      border-radius: 6px;
+      padding: 12px 16px;
+      font-size: 12px;
+      color: #ffcdd2;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      animation: slideIn .25s ease-out;
+    }
+    .alert-toast.warning {
+      background: #1a1000;
+      border-color: var(--warn);
+      border-left-color: var(--warn);
+      color: #fff3e0;
+    }
+
+    .alert-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+    .alert-text { line-height: 1.5; }
+    .alert-metric { font-weight: 700; display: block; margin-bottom: 2px; }
+
+    @keyframes slideIn {
+      from { transform: translateX(20px); opacity: 0; }
+      to   { transform: translateX(0);    opacity: 1; }
+    }
+
+    /* ── Responsive ───────────────────────────────────── */
+    @media (max-width: 700px) {
+      .charts-grid, .bottom-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- Header -->
+  <header>
+    <div class="logo-area">
+      <div class="logo-icon">&#9632;</div>
+      <div>
+        <h1>Linux <span>Monitor</span></h1>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="conn-badge">
+        <div class="dot" id="conn-dot"></div>
+        <span id="conn-label">conectado</span>
+      </div>
+      <div class="clock" id="clock">--:--:--</div>
+    </div>
+  </header>
+
+  <!-- Tarjetas -->
+  <div class="section-label">métricas actuales</div>
+  <div class="cards">
+    <div class="card ok-card" id="card-cpu">
+      <div class="card-label">CPU</div>
+      <div class="card-value ok" id="cpu-val">--%</div>
+      <div class="card-sub" id="cpu-sub">cargando...</div>
+      <canvas class="sparkline" id="spark-cpu"></canvas>
+    </div>
+    <div class="card ok-card" id="card-mem">
+      <div class="card-label">RAM</div>
+      <div class="card-value ok" id="mem-val">--%</div>
+      <div class="card-sub" id="mem-sub">cargando...</div>
+      <canvas class="sparkline" id="spark-mem"></canvas>
+    </div>
+    <div class="card ok-card" id="card-swap">
+      <div class="card-label">Swap</div>
+      <div class="card-value ok" id="swap-val">--%</div>
+      <div class="card-sub" id="swap-sub">intercambio</div>
+    </div>
+    <div class="card ok-card" id="card-load">
+      <div class="card-label">Load (1m)</div>
+      <div class="card-value ok" id="load-val">--</div>
+      <div class="card-sub" id="load-sub">promedio de carga</div>
+    </div>
+  </div>
+
+  <!-- Gráficas -->
+  <div class="section-label">historial — últimos 60 puntos</div>
+  <div class="charts-grid">
+    <div class="chart-box">
+      <div class="chart-header">
+        <span class="chart-title">CPU %</span>
+        <span class="chart-current ok" id="cpu-cur" style="color:var(--ok)">--</span>
+      </div>
+      <canvas id="chart-cpu"></canvas>
+    </div>
+    <div class="chart-box">
+      <div class="chart-header">
+        <span class="chart-title">RAM %</span>
+        <span class="chart-current" id="mem-cur" style="color:var(--purple)">--</span>
+      </div>
+      <canvas id="chart-mem"></canvas>
+    </div>
+  </div>
+
+  <!-- Disco -->
+  <div class="section-label">particiones de disco</div>
+  <div class="disk-grid" id="disk-grid">
+    <div class="disk-item">
+      <div class="disk-header">
+        <span class="disk-mount">/</span>
+        <span class="disk-info">cargando...</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill" style="width:0%;background:var(--ok)"></div></div>
+    </div>
+  </div>
+
+  <!-- Info del sistema + Load average -->
+  <div class="bottom-grid">
+    <div class="info-box">
+      <div class="section-label" style="margin-bottom:12px">núcleo / threads</div>
+      <div class="info-row">
+        <span class="info-key">núcleos físicos</span>
+        <span class="info-val accent" id="s-cores">--</span>
+      </div>
+      <div class="info-row">
+        <span class="info-key">threads lógicos</span>
+        <span class="info-val accent" id="s-threads">--</span>
+      </div>
+      <div class="info-row">
+        <span class="info-key">frecuencia</span>
+        <span class="info-val" id="s-freq">-- MHz</span>
+      </div>
+      <div class="info-row">
+        <span class="info-key">RAM total</span>
+        <span class="info-val" id="s-ramtotal">-- GB</span>
+      </div>
+      <div class="info-row">
+        <span class="info-key">RAM disponible</span>
+        <span class="info-val" id="s-ramavail">-- GB</span>
+      </div>
+      <div class="info-row">
+        <span class="info-key">swap total</span>
+        <span class="info-val" id="s-swaptotal">-- GB</span>
+      </div>
+    </div>
+
+    <div class="info-box">
+      <div class="section-label" style="margin-bottom:12px">load average</div>
+      <div class="load-row">
+        <span class="load-label">1 min</span>
+        <div class="load-bar-track"><div class="load-bar-fill" id="lb1" style="width:0%"></div></div>
+        <span class="load-val" id="lv1">--</span>
+      </div>
+      <div class="load-row">
+        <span class="load-label">5 min</span>
+        <div class="load-bar-track"><div class="load-bar-fill" id="lb5" style="width:0%;background:var(--purple)"></div></div>
+        <span class="load-val" id="lv5">--</span>
+      </div>
+      <div class="load-row">
+        <span class="load-label">15 min</span>
+        <div class="load-bar-track"><div class="load-bar-fill" id="lb15" style="width:0%;background:var(--muted)"></div></div>
+        <span class="load-val" id="lv15">--</span>
+      </div>
+      <div style="margin-top:16px;">
+        <div class="section-label" style="margin-bottom:10px">uso por núcleo</div>
+        <div id="cores-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:6px;"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Alertas flotantes -->
+<div id="alert-container"></div>
+
+<script>
+// ── Reloj ──────────────────────────────────────────────
+setInterval(() => {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('es-PE');
+}, 1000);
+
+// ── Helpers ────────────────────────────────────────────
+const MAX = 60;
+const mkArr = () => Array(MAX).fill(null);
+
+function colorVal(v, w=70, c=85) {
+  return v >= c ? 'crit' : v >= w ? 'warn' : 'ok';
+}
+function cssColor(v, w=70, c=85) {
+  return v >= c ? 'var(--crit)' : v >= w ? 'var(--warn)' : 'var(--ok)';
+}
+function diskColor(v) {
+  return v >= 90 ? 'var(--crit)' : v >= 70 ? 'var(--warn)' : 'var(--ok)';
+}
+function setCard(id, level) {
+  const el = document.getElementById(id);
+  el.className = `card ${level}-card`;
+}
+
+// ── Chart config factory ───────────────────────────────
+function mkChart(id, color) {
+  return new Chart(document.getElementById(id), {
+    type: 'line',
+    data: {
+      labels: Array(MAX).fill(''),
+      datasets: [{
+        data: mkArr(),
+        borderColor: color,
+        borderWidth: 1.5,
+        fill: true,
+        backgroundColor: color.replace(')', ', 0.07)').replace('var(', 'rgba(').replace('--ok','0,230,118').replace('--purple','124,77,255'),
+        tension: 0.4,
+        pointRadius: 0,
+        spanGaps: false,
+      }]
+    },
+    options: {
+      animation: false,
+      scales: {
+        x: { display: false },
+        y: {
+          min: 0, max: 100,
+          grid: { color: '#1e2d3d', drawBorder: false },
+          ticks: { color: '#546e7a', font: { family: "'JetBrains Mono'", size: 10 }, stepSize: 25 }
+        }
+      },
+      plugins: { legend: { display: false }, tooltip: { enabled: false } }
+    }
+  });
+}
+
+const cpuChart = mkChart('chart-cpu', 'var(--ok)');
+const memChart = mkChart('chart-mem', 'var(--purple)');
+
+// Sparklines (mini gráficas en tarjetas)
+function mkSpark(id, color) {
+  const ctx = document.getElementById(id);
+  if (!ctx) return null;
+  return new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: Array(20).fill(''),
+      datasets: [{ data: Array(20).fill(null), borderColor: color, borderWidth: 1,
+        fill: false, tension: 0.4, pointRadius: 0, spanGaps: false }]
+    },
+    options: {
+      animation: false,
+      scales: { x: { display: false }, y: { display: false, min: 0, max: 100 } },
+      plugins: { legend: { display: false }, tooltip: { enabled: false } }
+    }
+  });
+}
+
+const sparkCpu = mkSpark('spark-cpu', '#00e676');
+const sparkMem = mkSpark('spark-mem', '#7c4dff');
+
+function pushChart(chart, val) {
+  chart.data.datasets[0].data.shift();
+  chart.data.datasets[0].data.push(val);
+  chart.update('none');
+}
+
+// ── WebSocket ──────────────────────────────────────────
+const socket = io();
+let connected = false;
+
+socket.on('connect', () => {
+  connected = true;
+  document.getElementById('conn-dot').classList.remove('off');
+  document.getElementById('conn-label').textContent = 'conectado';
+});
+
+socket.on('disconnect', () => {
+  connected = false;
+  document.getElementById('conn-dot').classList.add('off');
+  document.getElementById('conn-label').textContent = 'sin conexión';
+});
+
+socket.on('metrics', m => {
+  const cpu = m.cpu.percent;
+  const mem = m.memory.percent;
+  const swap = m.memory.swap_percent;
+  const load1 = m.cpu.load_avg[0];
+
+  // ── Tarjeta CPU
+  document.getElementById('cpu-val').textContent = cpu.toFixed(1) + '%';
+  document.getElementById('cpu-val').className = `card-value ${colorVal(cpu)}`;
+  document.getElementById('cpu-sub').textContent = `${m.cpu.threads} threads · ${m.cpu.freq_mhz} MHz`;
+  document.getElementById('cpu-cur').textContent = cpu.toFixed(1) + '%';
+  document.getElementById('cpu-cur').style.color = cssColor(cpu);
+  setCard('card-cpu', colorVal(cpu));
+
+  // ── Tarjeta RAM
+  document.getElementById('mem-val').textContent = mem.toFixed(1) + '%';
+  document.getElementById('mem-val').className = `card-value ${colorVal(mem, 65, 80)}`;
+  document.getElementById('mem-sub').textContent = `${m.memory.used_gb} / ${m.memory.total_gb} GB`;
+  document.getElementById('mem-cur').textContent = mem.toFixed(1) + '%';
+  setCard('card-mem', colorVal(mem, 65, 80));
+
+  // ── Tarjeta Swap
+  document.getElementById('swap-val').textContent = swap.toFixed(1) + '%';
+  document.getElementById('swap-val').className = `card-value ${colorVal(swap, 50, 75)}`;
+  document.getElementById('swap-sub').textContent = `${m.memory.swap_used_gb} GB usados`;
+  setCard('card-swap', colorVal(swap, 50, 75));
+
+  // ── Tarjeta Load
+  document.getElementById('load-val').textContent = load1.toFixed(2);
+  document.getElementById('load-sub').textContent = `5m: ${m.cpu.load_avg[1]} · 15m: ${m.cpu.load_avg[2]}`;
+
+  // ── Gráficas
+  pushChart(cpuChart, cpu);
+  pushChart(memChart, mem);
+  if (sparkCpu) pushChart(sparkCpu, cpu);
+  if (sparkMem) pushChart(sparkMem, mem);
+
+  // ── Disco
+  const dg = document.getElementById('disk-grid');
+  dg.innerHTML = m.disk.map(d => `
+    <div class="disk-item">
+      <div class="disk-header">
+        <span class="disk-mount">${d.mountpoint}</span>
+        <span class="disk-info">${d.used_gb} / ${d.total_gb} GB · ${d.percent}%</span>
+      </div>
+      <div class="bar-track">
+        <div class="bar-fill" style="width:${d.percent}%;background:${diskColor(d.percent)}"></div>
+      </div>
+    </div>`).join('');
+
+  // ── Info sistema
+  document.getElementById('s-cores').textContent     = m.cpu.cores;
+  document.getElementById('s-threads').textContent   = m.cpu.threads;
+  document.getElementById('s-freq').textContent      = m.cpu.freq_mhz + ' MHz';
+  document.getElementById('s-ramtotal').textContent  = m.memory.total_gb + ' GB';
+  document.getElementById('s-ramavail').textContent  = m.memory.available_gb + ' GB';
+  document.getElementById('s-swaptotal').textContent = m.memory.swap_total_gb + ' GB';
+
+  // ── Load bars
+  const cores = m.cpu.cores || 1;
+  const toW = v => Math.min(100, (v / cores) * 100).toFixed(1);
+  document.getElementById('lb1').style.width  = toW(m.cpu.load_avg[0]) + '%';
+  document.getElementById('lb5').style.width  = toW(m.cpu.load_avg[1]) + '%';
+  document.getElementById('lb15').style.width = toW(m.cpu.load_avg[2]) + '%';
+  document.getElementById('lv1').textContent  = m.cpu.load_avg[0];
+  document.getElementById('lv5').textContent  = m.cpu.load_avg[1];
+  document.getElementById('lv15').textContent = m.cpu.load_avg[2];
+
+  // ── Uso por núcleo
+  const cg = document.getElementById('cores-grid');
+  cg.innerHTML = (m.cpu.per_core || []).map((v, i) => `
+    <div style="text-align:center">
+      <div style="font-size:10px;color:var(--muted);margin-bottom:4px">C${i}</div>
+      <div style="height:40px;background:var(--bg3);border-radius:3px;display:flex;align-items:flex-end;overflow:hidden">
+        <div style="width:100%;height:${v}%;background:${cssColor(v)};transition:height .4s;border-radius:3px 3px 0 0"></div>
+      </div>
+      <div style="font-size:10px;color:${cssColor(v)};margin-top:3px">${Math.round(v)}%</div>
+    </div>`).join('');
+});
+
+// ── Alertas toast ─────────────────────────────────────
+const alertTimers = {};
+socket.on('alerts', alerts => {
+  const container = document.getElementById('alert-container');
+  alerts.forEach(a => {
+    const key = a.metric;
+    if (alertTimers[key]) return; // ya hay una activa
+    const toast = document.createElement('div');
+    toast.className = `alert-toast${a.type === 'warning' ? ' warning' : ''}`;
+    toast.innerHTML = `
+      <span class="alert-icon">${a.type === 'warning' ? '⚠' : '✕'}</span>
+      <div class="alert-text">
+        <span class="alert-metric">${a.metric}</span>
+        ${a.value.toFixed(1)}% — umbral: ${a.threshold}%
+      </div>`;
+    container.appendChild(toast);
+    alertTimers[key] = setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transition = 'opacity .3s';
+      setTimeout(() => { toast.remove(); delete alertTimers[key]; }, 300);
+    }, 8000);
+  });
+});
+</script>
+</body>
+</html>

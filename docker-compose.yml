@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  monitor:
+    build: .
+    container_name: linux-monitor
+    ports:
+      - "5000:5000"       # Windows:5000 → Container Linux:5000
+    volumes:
+      - .:/app            # Sincroniza tu código Windows con el container
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=0 
+    restart: unless-stopped
